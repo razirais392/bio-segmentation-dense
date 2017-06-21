@@ -104,58 +104,56 @@ def pixelwise_ace_loss(y_true, y_hat, w=None):
                      (#_examples, #_classes, #_rows, #_cols)
 
         y_hat  :  Estimated class labels; same shape as y_true
-
-        w      :  Either None, or a vector with dimension #_classes
     """
 
     # In some cases, there may be no label associated with a pixel.
     # This is encoded as a "zero-hot" vector in y_true.
     #
     is_pixel_labeled = K.sum(y_true, axis=1)               # for one-hot or zero-hot, this should be 0 or 1
-    is_pixel_labeled = is_pixel_labeled.clip(0,1)          # for multi-label case
+    is_pixel_labeled = K.clip(is_pixel_labeled, 0,1)          # for multi-label case
+
+    # we could zero out estimates associated with unlabeled pixels, but this is
+    # not necessary (multiplying by y_true effectively does this)
+    #
+    #is_pixel_labeled = is_pixel_labeled[:,np.newaxis,:,:]  # enable broadcast
+    #y_hat = y_hat * is_pixel_labeled
 
     # Normally y_hat is coming from a sigmoid (or other "squashing")
     # and therefore never reaches exactly 0 or 1 (so the call to log
     # below is safe).  However, out of paranoia, we call clip() here.
-    y_hat = y_hat.clip(1e-9, 1 - 1e-9)
+    y_hat = K.clip(y_hat, 1e-9, 1 - 1e-9)
 
     # the categorical crossentropy loss
     # ** assumes one-hot encoding and sum-to-one along class dimension **
     loss = K.sum(y_true * K.log(y_hat), axis=1)
 
     if w is not None:
-        w = w.flatten()
-        w_map = w[np.newaxis, :, np.newaxis, np.newaxis]  # enables broadcast in next step
-        per_pixel_cost = K.sum(y_true * w_map, axis=1)
-        loss = loss * per_pixel_cost
-        
+        raise NotImplementedError('asymmetric weighting is a to-be-implemented feature')
+        #ce *= w
 
     #return K.mean(-loss)
     return K.sum(-loss) / K.sum(is_pixel_labeled)
 
 
 
-def total_variation_loss(y_true, y_hat):
+def total_variation_loss(x):
     """
     adapted from: keras/examples/neural_style_transfer.py
     """
-    assert K.ndim(y_hat) == 4
-    n_rows = y_hat.shape[-2]
-    n_cols = y_hat.shape[-1]
-    
-    # differences along rows and columns
-    # note: I assume channels first.
-    #
-    # note: even though these encodings are one-hot, this calculation should
-    #       still be reasonable (perhaps up to a scaling factor)
-    a = K.square(y_hat[:, :, :(n_rows-1), :(n_cols-1)] - y_hat[:, :, 1:, :(n_cols-1)])
-    b = K.square(y_hat[:, :, :(n_rows-1), :(n_cols-1)] - y_hat[:, :, :(n_rows-1), 1:])
-    
-    # a no-op involving y_true so that Theano doesn't complain about
-    # unused nodes in the computational graph.
-    zero = K.sum(0 * y_true.flatten())
+    raise RuntimeError('still under construction');
+    assert K.ndim(x) == 4
+    n_rows = x.shape[-2]
+    n_cols = x.shape[-1]
 
-    return K.sum(K.pow(a + b, 1.25)) + zero
+    a = K.square(x[:, :, :(n_rows-1), :(n_cols-1)] - x[:, :, 1:, :(n_cols-1)])
+    b = K.square(x[:, :, :(n_rows-1), :(n_cols-1)] - x[:, :, :(n_rows-1), 1:])
+
+    #if K.image_data_format() == 'channels_first':
+    #else:
+    #    a = K.square(x[:, :img_nrows - 1, :img_ncols - 1, :] - x[:, 1:, :img_ncols - 1, :])
+    #    b = K.square(x[:, :img_nrows - 1, :img_ncols - 1, :] - x[:, :img_nrows - 1, 1:, :])
+        
+    return K.sum(K.pow(a + b, 1.25))
 
 
 
@@ -167,7 +165,6 @@ def monotonic_in_row_loss(y_true, y_hat):
     n_cols = y_hat.shape[-1]
 
     # convert one-hot into class estimates.
-    # XXX: argmax() may not be terribly convenient to push a gradient through...
     y_hat_flat = y_hat.argmax(axis=1, keepdims=False)
 
     # if class labels are increasing down the row dimension, then we
@@ -178,8 +175,8 @@ def monotonic_in_row_loss(y_true, y_hat):
     diff = K.clip(diff, -np.Inf, 0)
     # diff = K.clip(dff, -1, 0)
 
-    # a no-op involving y_true so that Theano doesn't complain about
-    # unused nodes in the computational graph.
+    # here we do something meaningless to y_true so that Theano
+    # doesn't complain about unused nodes in the computational graph.
     zero = K.sum(0 * y_true.flatten())
 
     return K.sum(K.square(diff)) + zero
@@ -205,8 +202,8 @@ def create_unet(sz, n_classes=2, multi_label=False, f_loss=pixelwise_ace_loss):
     """
     
     assert(len(sz) == 3)
-    if not np.all(np.mod(sz[1:], 16) == 0):
-        raise ValueError('This network assumes the input image dimensions are multiple of 2^4')
+    #if not np.all(np.mod(sz[1:], 16) == 0):
+     #   raise ValueError('This network assumes the input image dimensions are multiple of 2^4')
 
     # NOTES:
     #   o possibly change Deconvolution2D to UpSampling2D
@@ -278,7 +275,8 @@ def create_unet(sz, n_classes=2, multi_label=False, f_loss=pixelwise_ace_loss):
 
     # mjp: my f1_score is only for binary case; use acc for now
     #model.compile(optimizer=Adam(lr=1e-3), loss=pixelwise_ace_loss, metrics=[f1_score])
-    model.compile(optimizer=Adam(lr=1e-3), loss=f_loss, metrics=['acc'])
+    #model.compile(optimizer=Adam(lr=1e-3), loss=f_loss, metrics=['acc'])
+    model.compile(optimizer=Adam(lr=1e-3), loss=pixelwise_ace_loss, metrics=['acc'])
 
     model.name = 'U-Net'
     return model
@@ -286,7 +284,7 @@ def create_unet(sz, n_classes=2, multi_label=False, f_loss=pixelwise_ace_loss):
 
 
 def train_model(X_train, Y_train, X_valid, Y_valid, model,
-                n_epochs=30, n_mb_per_epoch=25, mb_size=30, f_augment=random_minibatch, out_dir='.'):
+                n_epochs=30, n_mb_per_epoch=25, mb_size=30, xform=True, out_dir='.'):
     """
     Note: these are not epochs in the usual sense, since we randomly sample
     the data set (vs methodically marching through it)                
@@ -294,9 +292,8 @@ def train_model(X_train, Y_train, X_valid, Y_valid, model,
     assert(X_train.dtype == np.float32)
     
     sz = model.input_shape[-2:]
-    n_classes = model.output_shape[1]
-    n_missing_valid = np.sum(np.all(Y_valid < 0, axis=1))
     score_all = []
+    n_classes = model.output_shape[1]
     acc_best = -1
 
     # show some info about the training data
@@ -304,17 +301,16 @@ def train_model(X_train, Y_train, X_valid, Y_valid, model,
     print('[train_model]: Y_train is ', Y_train.shape, Y_train.dtype, np.min(Y_train), np.max(Y_train))
     print('[train_model]: X_valid is ', X_valid.shape, X_valid.dtype, np.min(X_valid), np.max(X_valid))
     print('[train_model]: Y_valid is ', Y_valid.shape, Y_valid.dtype, np.min(Y_valid), np.max(Y_valid))
-    print('[train_model]: model input shape:  ', model.input_shape)
-    print('[train_model]: model output shape: ', model.output_shape)
+    print('[train_model]: model input shape: ', model.input_shape)
 
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
 
     for e_idx in range(n_epochs):
         # run one "epoch"
-        print('\n[train_model]: starting "epoch" %d (of %d)' % (e_idx, n_epochs))
+        print('\n[train_model]: starting "epoch" %d (of %d)' % (e_idx + 1, n_epochs))
         for jj in print_generator(range(n_mb_per_epoch)):
-            Xi, Yi = f_augment(X_train, Y_train, mb_size, sz)
+            Xi, Yi = random_minibatch(X_train, Y_train, mb_size, sz, xform)
             Yi = pixelwise_one_hot(Yi, n_classes)
             loss, acc = model.train_on_batch(Xi, Yi)
             score_all.append(loss)
@@ -326,8 +322,7 @@ def train_model(X_train, Y_train, X_valid, Y_valid, model,
         acc = 100. * np.sum(Yi_hat == Y_valid) / Y_valid.size
         net_prob = np.sum(Yi_hat_oh, axis=1)  # This should be very close to 1 everywhere
 
-        if len(score_all) > 100:
-            print('[train_model]: recent train loss: %0.3f' % np.mean(score_all[-80:]))
+        print('[train_model]: recent train loss: %0.3f' % np.mean(score_all[-20:]))
         print('[train_model]: acc on validation data:   %0.3f' % acc)
         
         if n_classes == 2 and np.any(Yi_hat > 0):
@@ -338,10 +333,7 @@ def train_model(X_train, Y_train, X_valid, Y_valid, model,
         for ii in range(n_classes):
             frac_ii_yhat = 1. * np.sum(Yi_hat_oh[:,ii,...]) / Y_valid.size # "prob mass" in class ii
             frac_ii_y = 1. * np.sum(Y_valid == ii) / Y_valid.size
-            print('[train_model]:    [y=%d]  est: %0.3f,  true: %0.3f' % (ii, frac_ii_yhat, frac_ii_y))
-
-        print('[train_model]:    [y=missing]         true: %0.3f' % (n_missing_valid / Y_valid.size))
-
+            print('[train_model]:    frac y=%d:  %0.3f (%0.3f)' % (ii, frac_ii_yhat, frac_ii_y))
 
         # save state when appropriate
         if (acc > acc_best) or (e_idx == n_epochs-1):
