@@ -30,7 +30,7 @@ if __name__ == '__main__':
     tile_size = (256, 256)
     
     # load raw data
-    isbi_dir = os.path.expanduser('~/Data/ISBI-2012')
+    isbi_dir = os.path.expanduser('~/CIRCUIT/bio-segmentation-dense/Data')
     X_train = load_multilayer_tiff(os.path.join(isbi_dir, 'train-volume.tif'))
     Y_train = load_multilayer_tiff(os.path.join(isbi_dir, 'train-labels.tif'))
 
